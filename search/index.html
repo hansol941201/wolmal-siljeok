@@ -1715,8 +1715,10 @@ function timestampText() {
         setStatus("PDF 만들기 실패 · 인쇄로 저장");
         var go = window.confirm(
           "PDF 파일을 직접 만들지 못했습니다.\n(" + error.message + ")\n\n" +
-          "대신 브라우저 인쇄로 저장하시겠습니까?\n" +
-          "인쇄 설정의 '머리글과 바닥글'을 해제한 후 PDF로 저장하세요.");
+          "화면을 새로 고침(Ctrl+F5)한 뒤 다시 눌러 보세요.\n\n" +
+          "그래도 안 되면 [확인]을 눌러 브라우저 인쇄로 저장할 수 있습니다.\n" +
+          "이때는 인쇄 설정의 '머리글과 바닥글'을 해제한 후 PDF로 저장하세요.\n" +
+          "(해제하지 않으면 쪽마다 주소와 날짜가 찍힙니다)");
         if (go) { window.PourPdfPrintFallback(payload); }
       });
     }, 50);
@@ -2145,7 +2147,6 @@ window.onload = initialize;
         '<h1>공 사 실 적 현 황</h1><div class="rule"></div>' +
         '<p class="period">' + esc(period) + '</p>' +
         '<p class="total">총 ' + total.toLocaleString() + '건</p>' +
-        '<p class="scope">검색 조건 : ' + esc(criteria) + '<br>발행일 : ' + todayText() + '</p>' +
         '<div class="foot"><img src="' + LOGO_NETFORM + '" alt=""><img src="' + LOGO_POUR + '" alt=""></div>' +
       '</section>' +
       '<section class="pdf-body">' +
@@ -2642,13 +2643,24 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
   // 한글 글꼴은 PDF 를 만들 때만 필요하다. 그때 한 번만 불러온다.
   function loadFont(done) {
     if (window.POUR_FONT_NOTOSANSKR) { done(null); return; }
-    var s = document.createElement("script");
-    s.src = "font-notosanskr.js";
-    s.onload = function () {
-      done(window.POUR_FONT_NOTOSANSKR ? null : new Error("글꼴 파일을 읽지 못했습니다."));
-    };
-    s.onerror = function () { done(new Error("글꼴 파일(font-notosanskr.js)을 찾지 못했습니다.")); };
-    document.head.appendChild(s);
+    // 한 번 실패하면 캐시를 건너뛰고 다시 받아 본다.
+    // (오래된 화면이 열려 있어 예전 주소를 물고 있는 경우가 있다)
+    attempt("font-notosanskr.js", function (err) {
+      if (!err) { done(null); return; }
+      attempt("font-notosanskr.js?v=" + Date.now(), done);
+    });
+
+    function attempt(src, cb) {
+      var el = document.createElement("script");
+      el.src = src;
+      el.onload = function () {
+        cb(window.POUR_FONT_NOTOSANSKR ? null : new Error("글꼴 파일을 읽지 못했습니다."));
+      };
+      el.onerror = function () {
+        cb(new Error("글꼴 파일(font-notosanskr.js)을 불러오지 못했습니다."));
+      };
+      document.head.appendChild(el);
+    }
   }
 
   // 글꼴이 가진 글자 구간. 그리지 못할 글자가 있으면 조용히 빠뜨리지 않고 알린다.
@@ -2764,7 +2776,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     doc.addImage(LOGO_POUR, "PNG", x + nw + gap, base - ph / 2, pw, ph);
   }
 
-  function coverPage(doc, period, total, criteria) {
+  function coverPage(doc, period, total) {
     var pw = 92, ph = pw * R_POUR;
     doc.addImage(LOGO_POUR, "PNG", (PW - pw) / 2, 150, pw, ph);
 
@@ -2783,11 +2795,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     setColor(doc, GREY);
     drawText(doc, "총 " + num(total) + "건", PW / 2, 424, { align: "center" });
 
-    doc.setFontSize(10);
-    var lines = doc.splitTextToSize("검색 조건 : " + criteria, PW - M * 2 - 120);
-    var y = 464;
-    lines.forEach(function (l) { drawText(doc, l, PW / 2, y, { align: "center" }); y += 16; });
-    drawText(doc, "발행일 : " + todayText(), PW / 2, y + 4, { align: "center" });
+    // 표지에는 기간과 건수만 둔다.
+    // 검색 조건과 발행일은 마지막 확인 장에 적혀 있다.
 
     bottomLogos(doc);
   }
@@ -2880,7 +2889,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     registerFont(doc);
     fontReady = true;
 
-    coverPage(doc, period, total, criteria);
+    coverPage(doc, period, total);
     doc.addPage();
 
     var body = rows.map(function (r) {
