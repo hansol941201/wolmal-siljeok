@@ -2321,7 +2321,7 @@ window.onload = initialize;
         '<h2>위와 같이 공사실적을 제출합니다.</h2>' +
         '<div class="sum">수록 기간 &nbsp;' + esc(period) + '<br>전체 실적 &nbsp;' +
           total.toLocaleString() + '건<br>검색 조건 &nbsp;' + esc(criteria) + '</div>' +
-        '<div class="sign">주식회사 넷폼알엔디<img src="' + SEAL + '" alt=""></div>' +
+        '<div class="sign">주식회사 넷폼<img src="' + SEAL + '" alt=""></div>' +
         '<div class="addr">경기도 오산시 서동로 77, 3층<br>TEL 070-7705-1311 · FAX 031-373-2734<br>' +
           todayText() + '</div>' +
         '<div class="foot"><img src="' + LOGO_NETFORM + '" alt=""><img src="' + LOGO_POUR + '" alt=""></div>' +
@@ -2985,7 +2985,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     y += 72;
     doc.setFontSize(13);
     setColor(doc, NAVY);
-    var name = "주식회사 넷폼알엔디";
+    var name = "주식회사 넷폼";
     drawText(doc, name, x, y, { bold: true });
     var w = doc.getTextWidth(name);
     var seal = 56;
@@ -3030,8 +3030,12 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     coverPage(doc, period, total);
     doc.addPage();
 
-    var body = rows.map(function (r) {
-      return columns.map(function (key) {
+    // 순번은 엑셀에 적힌 값이 아니라 이 문서의 차례로 매긴다.
+    // 검색·필터를 걸면 원래 번호가 띄엄띄엄해져 제출본에서 어긋나 보인다.
+    var seqAt = columns.indexOf("순번");
+    var body = rows.map(function (r, rowIndex) {
+      return columns.map(function (key, colIndex) {
+        if (colIndex === seqAt) { return String(rowIndex + 1); }
         var v = r.original && r.original[key] !== undefined ? r.original[key] : (r.data ? r.data[key] : "");
         return v === null || v === undefined ? "" : sanitize(String(v));
       });
@@ -3082,7 +3086,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
         // 바닥글 : 회사명 + 쪽번호 (우리가 그린 것)
         doc.setFontSize(8);
         setColor(doc, GREY);
-        drawText(doc, "주식회사 넷폼알엔디", M, PH - M + 2);
+        drawText(doc, "주식회사 넷폼", M, PH - M + 2);
         drawText(doc, doc.internal.getNumberOfPages() + " / {tp}", PW - M, PH - M + 2, { align: "right" });
       }
     });
