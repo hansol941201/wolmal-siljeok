@@ -865,6 +865,117 @@ function getProjectRoot() { return ""; }
 
 var POUR_STATE = { index: null, file: null, rows: null };
 
+/* ─────────────────────────────────────────────────────────────
+   저장해 둔 엑셀 자료 (IndexedDB)
+
+   한 번 고른 엑셀을 브라우저에 남겨 두어, 새로고침하거나 브라우저를
+   껐다 켜도 파일을 다시 고르지 않게 한다.
+
+   · 엑셀 원본이 아니라 분석이 끝난 검색 자료를 그대로 담는다.
+   · 자료가 크므로 localStorage 가 아니라 IndexedDB 를 쓴다.
+   · 새 자료는 트랜잭션 하나로 바꿔 넣는다. 저장 도중에 창을 닫아도
+     앞의 정상 자료가 망가지지 않는다.
+   ───────────────────────────────────────────────────────────── */
+var POUR_DB = {
+  name: "pour-siljeok-searcher",   // 이 검색기 전용 데이터베이스
+  store: "workbookIndex",          // 검색 자료를 담는 곳
+  version: 1,
+  key: "current",                  // 지금 쓰는 자료 한 벌
+  formatVersion: 1                 // 자료 형식. 뒤에 바뀌면 올린다.
+};
+
+/** 저장한 자료를 화면에서 쓸 수 있게 기억해 둔다. */
+var POUR_SAVED = null;
+
+function pourDbAvailable() {
+  try { return !!window.indexedDB; } catch (e) { return false; }
+}
+
+function openPourDb(done) {
+  if (!pourDbAvailable()) {
+    done(new Error("이 브라우저는 IndexedDB 를 쓸 수 없습니다."));
+    return;
+  }
+  var request;
+  try { request = window.indexedDB.open(POUR_DB.name, POUR_DB.version); }
+  catch (error) { done(error); return; }
+
+  request.onupgradeneeded = function () {
+    var db = request.result;
+    if (!db.objectStoreNames.contains(POUR_DB.store)) {
+      db.createObjectStore(POUR_DB.store, { keyPath: "id" });
+    }
+  };
+  request.onsuccess = function () { done(null, request.result); };
+  request.onerror = function () {
+    done(request.error || new Error("저장소를 열지 못했습니다."));
+  };
+  request.onblocked = function () {
+    done(new Error("다른 탭에서 이 검색기를 열어 두어 저장소를 쓸 수 없습니다."));
+  };
+}
+
+/** 분석이 끝난 검색 자료를 저장한다. 다 저장될 때까지 기다린다. */
+function savePourIndex(index, file, done) {
+  openPourDb(function (error, db) {
+    if (error) { done(error); return; }
+    var metadata = index.metadata || {};
+    var record = {
+      id: POUR_DB.key,
+      formatVersion: POUR_DB.formatVersion,
+      fileName: (index.workbook && index.workbook.name) || (file && file.name) || "",
+      savedAt: new Date().toISOString(),
+      recordCount: (index.summary && Number(index.summary.recordCount)) || 0,
+      minYear: metadata.minYear || null,
+      maxYear: metadata.maxYear || null,
+      index: index
+    };
+    var tx;
+    try { tx = db.transaction(POUR_DB.store, "readwrite"); }
+    catch (txError) { db.close(); done(txError); return; }
+
+    // 트랜잭션이 끝나야 저장이 끝난 것이다. put 성공만 보고 넘어가지 않는다.
+    tx.oncomplete = function () { db.close(); POUR_SAVED = record; done(null, record); };
+    tx.onerror = function () { db.close(); done(tx.error || new Error("저장하지 못했습니다.")); };
+    tx.onabort = function () { db.close(); done(tx.error || new Error("저장이 취소되었습니다.")); };
+    try { tx.objectStore(POUR_DB.store).put(record); }
+    catch (putError) { try { tx.abort(); } catch (e) {} }
+  });
+}
+
+/** 저장해 둔 검색 자료를 읽는다. 없으면 null 을 준다. */
+function loadPourIndex(done) {
+  openPourDb(function (error, db) {
+    if (error) { done(error); return; }
+    var tx, request;
+    try {
+      tx = db.transaction(POUR_DB.store, "readonly");
+      request = tx.objectStore(POUR_DB.store).get(POUR_DB.key);
+    } catch (txError) { db.close(); done(txError); return; }
+
+    request.onsuccess = function () {
+      var record = request.result || null;
+      db.close();
+      if (!record || !record.index) { done(null, null); return; }
+      // 형식이 더 새 것이면 읽지 않는다. 같거나 낮으면 그대로 쓴다.
+      if (Number(record.formatVersion || 1) > POUR_DB.formatVersion) {
+        done(null, null);
+        return;
+      }
+      done(null, record);
+    };
+    request.onerror = function () {
+      db.close();
+      done(request.error || new Error("저장된 자료를 읽지 못했습니다."));
+    };
+  });
+}
+
+/** 저장해 둔 자료가 있는지. 새 파일을 고를 때 물어볼지 판단한다. */
+function hasSavedWorkbook() {
+  return !!(POUR_SAVED && POUR_SAVED.index);
+}
+
 /** 고른 엑셀을 읽어 검색 인덱스를 만든다. 원래 Build-SearchIndex.ps1 이 하던 일. */
 function buildIndexFromFile(file, done) {
   var reader = new FileReader();
@@ -927,35 +1038,81 @@ function resetSearchState() {
 
 function handleWorkbookChosen(file) {
   if (!file) return;
+
+  // 이미 저장해 둔 자료가 있으면 먼저 묻는다. 취소하면 그대로 둔다.
+  if (hasSavedWorkbook() &&
+      !window.confirm("저장된 Excel 데이터를 새 파일로 교체하시겠습니까?")) {
+    return;
+  }
+
   resetSearchState();
   setBusy(true, "엑셀 파일 분석 중...", "모든 시트를 읽어 검색 자료를 만들고 있습니다.");
   document.getElementById("analysisStatus").innerText = "Excel 분석중...";
   window.setTimeout(function () {
     buildIndexFromFile(file, function (error) {
-      setBusy(false);
       if (error) {
+        setBusy(false);
         document.getElementById("analysisStatus").innerText = "분석 실패";
         setStatus("분석 오류: " + error.message);
         alert("엑셀 파일을 읽지 못했습니다.\n\n" + error.message);
         return;
       }
-      // 화면 갱신까지 여기서 끝낸다. 어느 길로 파일이 들어오든 같게 동작한다.
-      try {
-        loadData();
-        setStatus("준비");
-      } catch (loadError) {
-        document.getElementById("analysisStatus").innerText = "분석 실패";
-        setStatus("불러오기 오류: " + loadError.message);
-        alert("검색 자료를 만들지 못했습니다.\n\n" + loadError.message);
-      }
+      // 다 저장한 뒤에 화면을 채운다. 저장이 끝나기 전에 완료로 보이면 안 된다.
+      var index = POUR_STATE.index;
+      setBusy(true, "저장하는 중...", "다음에 열 때 바로 쓰도록 저장하고 있습니다.");
+      savePourIndex(index, file, function (saveError) {
+        setBusy(false);
+        finishWorkbookLoad(saveError);
+      });
     });
   }, 50);
+}
+
+/* 화면 갱신은 한 곳에서만 한다. 파일을 새로 골랐을 때와
+   저장해 둔 자료를 되살렸을 때가 같게 동작해야 한다. */
+function finishWorkbookLoad(saveError) {
+  try {
+    loadData();
+  } catch (loadError) {
+    document.getElementById("analysisStatus").innerText = "분석 실패";
+    setStatus("불러오기 오류: " + loadError.message);
+    alert("검색 자료를 만들지 못했습니다.\n\n" + loadError.message);
+    return;
+  }
+  if (saveError) {
+    // 검색은 되지만 다음에 열 때 다시 골라야 한다. 완료라고 하지 않는다.
+    setStatus("저장 실패 · 다음에 열 때 파일을 다시 골라야 합니다 (" + saveError.message + ")");
+    return;
+  }
+  setStatus("준비");
+}
+
+/* 화면이 뜰 때 저장해 둔 자료를 되살린다.
+   되살리지 못했을 때만 파일을 고르라는 화면을 남긴다. */
+function restoreSavedWorkbook(done) {
+  if (!pourDbAvailable()) { done(false); return; }
+  document.getElementById("workbookInfo").innerText =
+    "저장된 Excel 데이터를 불러오는 중…";
+  setStatus("저장된 Excel 데이터를 불러오는 중…");
+  setBusy(true, "저장된 Excel 데이터를 불러오는 중…", "지난번에 연 자료를 되살리고 있습니다.");
+  loadPourIndex(function (error, record) {
+    setBusy(false);
+    if (error || !record) { done(false); return; }
+    POUR_SAVED = record;
+    POUR_STATE.index = record.index;
+    POUR_STATE.file = null;          // 원본 파일은 갖고 있지 않다
+    finishWorkbookLoad(null);
+    done(true);
+  });
 }
 
 function bindWorkbookInput() {
   var input = document.getElementById("workbookFileInput");
   input.addEventListener("change", function () {
-    handleWorkbookChosen(input.files && input.files[0]);
+    var file = input.files && input.files[0];
+    // 고른 것을 비워 둔다. 교체를 취소한 뒤 같은 파일을 다시 골라도 열리게.
+    input.value = "";
+    handleWorkbookChosen(file);
   });
 }
 
@@ -1652,7 +1809,7 @@ function timestampText() {
     button.innerText = abbreviateFileName(name);
     button.title = name;
     byId("selectWorkbookButton").innerText = name === "파일 미선택" ?
-      "Excel 파일 선택" : "파일 변경";
+      "Excel 파일 선택" : "Excel 변경";
   }
 
   function formatProcessError(response) {
@@ -1946,7 +2103,9 @@ function timestampText() {
     byId("workbookInfo").innerText = state.index.workbook.name + " · " +
       state.index.metadata.totalSheetCount + "개 시트 (데이터 " + state.index.metadata.dataSheetCount + ") · " +
       Number(state.index.summary.recordCount).toLocaleString() + "건 · " +
-      new Date(state.index.generatedAt).toLocaleString();
+      new Date(state.index.generatedAt).toLocaleString() +
+      (POUR_SAVED && POUR_SAVED.savedAt
+        ? " · 저장됨 " + new Date(POUR_SAVED.savedAt).toLocaleString() : "");
     var metadata = state.index.metadata;
     var firstYear = metadata.years.length ? metadata.years[0] : "-";
     var lastYear = metadata.years.length ? metadata.years[metadata.years.length - 1] : "-";
@@ -2058,6 +2217,15 @@ function timestampText() {
     byId("workbookInfo").innerText =
       "오른쪽 위 [Excel 파일 선택] 을 눌러 공사실적 엑셀을 여세요.";
     setStatus("엑셀 파일을 선택해 주세요.");
+
+    // 저장해 둔 자료가 있으면 파일을 다시 고르지 않는다.
+    restoreSavedWorkbook(function (restored) {
+      if (restored) { return; }
+      byId("analysisStatus").innerText = "Excel 대기";
+      byId("workbookInfo").innerText =
+        "오른쪽 위 [Excel 파일 선택] 을 눌러 공사실적 엑셀을 여세요.";
+      setStatus("엑셀 파일을 선택해 주세요.");
+    });
   }
 
   
