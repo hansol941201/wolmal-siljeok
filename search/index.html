@@ -197,6 +197,7 @@ html, body { max-width: 100%; }
 
   #pdfDoc .pdf-head{border-bottom:.7mm solid #093647;padding-bottom:2mm;margin-bottom:4mm;overflow:hidden;}
   #pdfDoc .pdf-head b{font-size:12pt;color:#093647;float:left;}
+  #pdfDoc .pdf-head em{float:left;margin:.4mm 0 0 4mm;padding:.6mm 3mm;border-radius:1mm;background:#EF7716;color:#fff;font-style:normal;font-size:9.5pt;font-weight:700;}
   #pdfDoc .pdf-head span{float:right;font-size:8.5pt;color:#5A6970;padding-top:2mm;}
 
   #pdfDoc table{width:100%;border-collapse:collapse;font-size:7.6pt;table-layout:fixed;}
@@ -2407,6 +2408,21 @@ window.onload = initialize;
       : nums[0] + "년 ~ " + nums[nums.length - 1] + "년";
   }
 
+  // 행을 연도별로 나눈다. 연도 안에서는 화면에서 정렬한 순서를 그대로 둔다.
+  function groupByYear(rows, keys) {
+    var byKey = {};
+    rows.forEach(function (r) {
+      var y = (r.data && r.data["년도"]) || "";
+      y = y === "" || y === null || y === undefined ? UNKNOWN_YEAR : String(y);
+      (byKey[y] = byKey[y] || []).push(r);
+    });
+    return keys.map(function (k) { return { key: k, rows: byKey[k] }; });
+  }
+
+  function yearLabel(key) {
+    return key === UNKNOWN_YEAR ? key : key + "년";
+  }
+
   // 대비책. PDF 를 직접 만들지 못할 때만 인쇄창을 쓴다.
   // 이 경로에서는 브라우저가 주소·날짜를 머리글/바닥글로 넣을 수 있으므로
   // @page 여백을 0 으로 두어 그 자리를 없앴고, 안내 문구도 함께 띄운다.
@@ -2426,13 +2442,25 @@ window.onload = initialize;
       return '<col style="width:' + ((widths[i] || 60) / wsum * 100).toFixed(2) + '%">';
     }).join("") + "</colgroup>";
     var head = "<tr>" + labels.map(function (l) { return "<th>" + esc(l) + "</th>"; }).join("") + "</tr>";
-    var body = rows.map(function (r) {
-      return "<tr>" + columns.map(function (key, ci) {
-        var v = r.original && r.original[key] !== undefined ? r.original[key] : (r.data ? r.data[key] : "");
-        var cls = ci === 0 ? " class=\"num\""
-          : (key === "지역" || key === "도시" || key === "세대수" ? " class=\"mid\"" : "");
-        return "<td" + cls + ">" + esc(v) + "</td>";
-      }).join("") + "</tr>";
+    function bodyRows(groupRows) {
+      return groupRows.map(function (r) {
+        return "<tr>" + columns.map(function (key, ci) {
+          var v = r.original && r.original[key] !== undefined ? r.original[key] : (r.data ? r.data[key] : "");
+          var cls = ci === 0 ? " class=\"num\""
+            : (key === "지역" || key === "도시" || key === "세대수" ? " class=\"mid\"" : "");
+          return "<td" + cls + ">" + esc(v) + "</td>";
+        }).join("") + "</tr>";
+      }).join("");
+    }
+
+    // 연도마다 새 쪽에서 시작하고, 머리글에 그 연도를 적는다.
+    var sections = groupByYear(rows, yb.keys).map(function (g) {
+      return '<section class="pdf-body">' +
+        '<div class="pdf-head"><b>공사실적 목록</b><em>' + esc(yearLabel(g.key)) + ' · ' +
+          g.rows.length.toLocaleString() + '건</em><span>' + esc(period) + ' · 총 ' +
+          total.toLocaleString() + '건</span></div>' +
+        '<table>' + cols + '<thead>' + head + '</thead><tbody>' + bodyRows(g.rows) + '</tbody></table>' +
+      '</section>';
     }).join("");
 
     var html =
@@ -2443,11 +2471,7 @@ window.onload = initialize;
         '<p class="total">총 ' + total.toLocaleString() + '건</p>' +
         '<div class="foot"><img src="' + LOGO_NETFORM + '" alt=""><img src="' + LOGO_POUR + '" alt=""></div>' +
       '</section>' +
-      '<section class="pdf-body">' +
-        '<div class="pdf-head"><b>공사실적 목록</b><span>' + esc(period) + ' · 총 ' +
-          total.toLocaleString() + '건</span></div>' +
-        '<table>' + cols + '<thead>' + head + '</thead><tbody>' + body + '</tbody></table>' +
-      '</section>' +
+      sections +
       '<section class="pdf-close">' +
         '<div class="rule"></div>' +
         '<h2>위와 같이 공사실적을 제출합니다.</h2>' +
@@ -3057,6 +3081,36 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
       ? nums[0] + "년" : nums[0] + "년 ~ " + nums[nums.length - 1] + "년";
   }
 
+  // 행을 연도별로 나눈다. 연도 안에서는 화면에서 정렬한 순서를 그대로 둔다.
+  function groupByYear(rows, keys) {
+    var byKey = {};
+    rows.forEach(function (r) {
+      var y = (r.data && r.data["년도"]) || "";
+      y = (y === "" || y === null || y === undefined) ? UNKNOWN_YEAR : String(y);
+      (byKey[y] = byKey[y] || []).push(r);
+    });
+    return keys.map(function (k) { return { key: k, rows: byKey[k] }; });
+  }
+
+  function yearLabel(key) {
+    return key === UNKNOWN_YEAR ? key : key + "년";
+  }
+
+  // 오른쪽 가장자리의 연도 색인 탭. 바인더 색인처럼 연도마다 아래로 한 칸씩 내려간다.
+  function yearTab(doc, label, index, count) {
+    var top = M + 46, bottom = PH - M - 24;
+    var gap = 4;
+    var h = Math.min(72, (bottom - top - gap * (count - 1)) / count);
+    var w = 20;
+    var y = top + index * (h + gap);
+    fill(doc, ORANGE);
+    doc.roundedRect(PW - w, y, w + 6, h, 4, 4, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(Math.min(9, h / 5.5));
+    // 세로로 돌려 쓴다 (아래에서 위로 읽힌다)
+    doc.text(label, PW - w / 2 + 3, y + h / 2 + doc.getTextWidth(label) / 2, { angle: 90 });
+  }
+
   function bottomLogos(doc) {
     var nw = 132, nh = nw * R_NETFORM;
     var pw = 46, ph = pw * R_POUR;
@@ -3160,17 +3214,25 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     fontReady = true;
 
     coverPage(doc, period, total);
-    doc.addPage();
 
     // 순번은 엑셀에 적힌 값이 아니라 이 문서의 차례로 매긴다.
     // 검색·필터를 걸면 원래 번호가 띄엄띄엄해져 제출본에서 어긋나 보인다.
+    // 연도별로 나눠도 순번은 문서 처음부터 끝까지 이어진다.
     var seqAt = columns.indexOf("순번");
-    var body = rows.map(function (r, rowIndex) {
-      return columns.map(function (key, colIndex) {
-        if (colIndex === seqAt) { return String(rowIndex + 1); }
-        var v = r.original && r.original[key] !== undefined ? r.original[key] : (r.data ? r.data[key] : "");
-        return v === null || v === undefined ? "" : sanitize(String(v));
-      });
+    var seq = 0;
+    var groups = groupByYear(rows, yb.keys).map(function (g) {
+      return {
+        label: sanitize(yearLabel(g.key)),
+        count: g.rows.length,
+        body: g.rows.map(function (r) {
+          seq++;
+          return columns.map(function (key, colIndex) {
+            if (colIndex === seqAt) { return String(seq); }
+            var v = r.original && r.original[key] !== undefined ? r.original[key] : (r.data ? r.data[key] : "");
+            return v === null || v === undefined ? "" : sanitize(String(v));
+          });
+        })
+      };
     });
 
     var avail = PW - M * 2;
@@ -3183,51 +3245,68 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
       if (k === "지역" || k === "도시" || k === "세대수") { colStyles[i].halign = "center"; }
     });
 
-    doc.autoTable({
-      head: [labels],
-      body: body,
-      startY: M + 46,
-      margin: { top: M + 46, right: M, bottom: M + 24, left: M },
-      theme: "grid",
-      styles: {
-        font: FONT, fontStyle: "normal", fontSize: 7.6, cellPadding: 4,
-        lineColor: LINE, lineWidth: 0.5, textColor: INK, overflow: "linebreak",
-        valign: "top", minCellHeight: 0
-      },
-      headStyles: {
-        font: FONT, fillColor: NAVY, textColor: [255, 255, 255],
-        halign: "center", fontSize: 8, lineColor: NAVY, cellPadding: 5
-      },
-      alternateRowStyles: { fillColor: ZEBRA },
-      columnStyles: colStyles,
-      rowPageBreak: "avoid",
-      showHead: "everyPage",
-      didDrawPage: function (data) {
-        // 머리글 : 문서명 + 기간·건수 (우리가 그린 것)
-        setColor(doc, NAVY);
-        doc.setFontSize(12);
-        drawText(doc, "공사실적 목록", M, M + 16, { bold: true });
-        doc.setFontSize(8.5);
-        setColor(doc, GREY);
-        drawText(doc, period + " · 총 " + num(total) + "건", PW - M, M + 16, { align: "right" });
-        doc.setDrawColor(NAVY[0], NAVY[1], NAVY[2]);
-        doc.setLineWidth(2);
-        doc.line(M, M + 26, PW - M, M + 26);
-        doc.setLineWidth(0.5);
-
-        // 바닥글 : 회사명 + 쪽번호 (우리가 그린 것)
-        doc.setFontSize(8);
-        setColor(doc, GREY);
-        drawText(doc, "주식회사 넷폼", M, PH - M + 2);
-        drawText(doc, doc.internal.getNumberOfPages() + " / {tp}", PW - M, PH - M + 2, { align: "right" });
-      }
+    // 연도마다 새 쪽에서 표를 시작한다.
+    groups.forEach(function (g, groupIndex) {
+      doc.addPage();
+      doc.autoTable({
+        head: [labels],
+        body: g.body,
+        startY: M + 46,
+        margin: { top: M + 46, right: M, bottom: M + 24, left: M },
+        theme: "grid",
+        styles: {
+          font: FONT, fontStyle: "normal", fontSize: 7.6, cellPadding: 4,
+          lineColor: LINE, lineWidth: 0.5, textColor: INK, overflow: "linebreak",
+          valign: "top", minCellHeight: 0
+        },
+        headStyles: {
+          font: FONT, fillColor: NAVY, textColor: [255, 255, 255],
+          halign: "center", fontSize: 8, lineColor: NAVY, cellPadding: 5
+        },
+        alternateRowStyles: { fillColor: ZEBRA },
+        columnStyles: colStyles,
+        rowPageBreak: "avoid",
+        showHead: "everyPage",
+        didDrawPage: function (data) {
+          // 머리글 : 문서명 + 기간·건수 (우리가 그린 것)
+          setColor(doc, NAVY);
+          doc.setFontSize(12);
+          drawText(doc, "공사실적 목록", M, M + 16, { bold: true });
+          // 제목 옆에 이 쪽의 연도와 그 연도의 건수를 주황 띠로 적는다.
+          var yearText = g.label + " · " + num(g.count) + "건";
+          var yx = M + doc.getTextWidth("공사실적 목록") + 12;
+          doc.setFontSize(9.5);
+          var yw = doc.getTextWidth(yearText) + 14;
+          fill(doc, ORANGE);
+          doc.roundedRect(yx, M + 3, yw, 18, 3, 3, "F");
+          setColor(doc, [255, 255, 255]);
+          drawText(doc, yearText, yx + 7, M + 15.5, { bold: true });
+          doc.setDrawColor(NAVY[0], NAVY[1], NAVY[2]);
+          yearTab(doc, g.label, groupIndex, groups.length);
+          doc.setFontSize(8.5);
+          setColor(doc, GREY);
+          drawText(doc, period + " · 총 " + num(total) + "건", PW - M, M + 16, { align: "right" });
+          doc.setDrawColor(NAVY[0], NAVY[1], NAVY[2]);
+          doc.setLineWidth(2);
+          doc.line(M, M + 26, PW - M, M + 26);
+          doc.setLineWidth(0.5);
+  
+          // 바닥글 : 회사명 + 쪽번호 (우리가 그린 것)
+          doc.setFontSize(8);
+          setColor(doc, GREY);
+          drawText(doc, "주식회사 넷폼", M, PH - M + 2);
+          drawText(doc, doc.internal.getNumberOfPages() + " / {tp}", PW - M, PH - M + 2, { align: "right" });
+        }
+      });
     });
 
     closingPage(doc, period, total, criteria);
 
     // 글꼴에 없는 글자가 있었다면 빈칸으로 나가므로 그대로 알린다.
     var flat = [];
-    body.forEach(function (r) { r.forEach(function (c) { flat.push(c); }); });
+    groups.forEach(function (g) {
+      g.body.forEach(function (r) { r.forEach(function (c) { flat.push(c); }); });
+    });
     flat.push(criteria);
     var miss = missingChars(flat);
     if (miss.length) {
