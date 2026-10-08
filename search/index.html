@@ -248,7 +248,7 @@ html, body { max-width: 100%; }
         <h2>검색조건</h2>
         <div class="search-fields">
           <div class="field-group"><label for="workTypeButton">공종</label><div id="workTypeCombo" class="check-combo"><button id="workTypeButton" class="check-combo-button" type="button">전체</button><div id="workTypePanel" class="check-combo-panel"></div></div></div>
-          <div class="field-group patent-field"><label for="patentFilter">특허번호</label><select id="patentFilter"><option value="">전체</option></select></div>
+          <div class="field-group patent-field"><label for="patentButton">특허번호</label><div id="patentCombo" class="check-combo"><button id="patentButton" class="check-combo-button" type="button">전체</button><div id="patentPanel" class="check-combo-panel"></div></div></div>
           <div class="field-group region-field"><label for="regionButton">지역</label><div id="regionCombo" class="check-combo"><button id="regionButton" class="check-combo-button" type="button">전체</button><div id="regionPanel" class="check-combo-panel"></div></div></div>
           <div class="field-group region-field"><label for="cityFilter">도시</label><select id="cityFilter"><option value="">전체</option></select></div>
           <div class="field-group household-field"><label for="householdInput">세대수</label><input id="householdInput" type="text" inputmode="numeric" maxlength="7" autocomplete="off" placeholder="최소" /></div>
@@ -1021,14 +1021,14 @@ function buildIndexFromFile(file, done) {
 function resetSearchState() {
   try { window.localStorage.removeItem("pourSearchCriteria"); } catch (e) {}
   POUR_STATE.index = null;
-  ["patentFilter", "cityFilter",
+  ["cityFilter",
    "startYearFilter", "endYearFilter"].forEach(function (id) {
     var el = document.getElementById(id);
     if (el) { el.value = ""; el.options.length = 1; }     // "전체" 만 남긴다
   });
   var households = document.getElementById("householdInput");
   if (households) households.value = "";
-  ["workTypePanel", "regionPanel"].forEach(function (id) {
+  ["workTypePanel", "regionPanel", "patentPanel"].forEach(function (id) {
     var panel = document.getElementById(id);
     if (panel) panel.innerHTML = "";
   });
@@ -1251,6 +1251,39 @@ function timestampText() {
     var inputs = byId("regionPanel").getElementsByTagName("input");
     for (i = 0; i < inputs.length; i++) { inputs[i].checked = !!selected[inputs[i].value]; }
     updateRegionSummary();
+  }
+
+  // 특허번호 다중 선택. 값은 "10-" 을 뗀 번호, 화면에는 "10-" 을 붙여 보인다.
+  function getSelectedPatentNumbers() {
+    var panel = byId("patentPanel");
+    var inputs = panel ? panel.getElementsByTagName("input") : [];
+    var values = [];
+    var i;
+    for (i = 0; i < inputs.length; i++) {
+      if (inputs[i].checked) { values.push(inputs[i].value); }
+    }
+    return values;
+  }
+
+  function formatPatentNumbers(values) {
+    var texts = [];
+    var i;
+    for (i = 0; i < values.length; i++) { texts.push("10-" + values[i]); }
+    return texts;
+  }
+
+  function updatePatentSummary() {
+    byId("patentButton").innerText = getWorkTypeSummary(formatPatentNumbers(getSelectedPatentNumbers()));
+  }
+
+  function setSelectedPatentNumbers(values) {
+    var selected = {};
+    var i;
+    values = values || [];
+    for (i = 0; i < values.length; i++) { selected[String(values[i]).replace(/^10-/, "")] = true; }
+    var inputs = byId("patentPanel").getElementsByTagName("input");
+    for (i = 0; i < inputs.length; i++) { inputs[i].checked = !!selected[inputs[i].value]; }
+    updatePatentSummary();
   }
 
   function byId(id) {
@@ -1494,6 +1527,15 @@ function timestampText() {
     return false;
   }
 
+  function recordMatchesAnyPatent(record, patentQueries) {
+    if (!patentQueries.length) { return true; }
+    var i;
+    for (i = 0; i < patentQueries.length; i++) {
+      if (recordMatches(record, patentQueries[i], "특허번호")) { return true; }
+    }
+    return false;
+  }
+
   function applyFilters() {
     var startedAt = new Date().getTime();
     var workTypeQueries = getSelectedWorkTypes();
@@ -1505,7 +1547,7 @@ function timestampText() {
     var provinceCodes = getSelectedProvinceCodes();
     var cityName = provinceCodes.length === 1 ? byId("cityFilter").value : "";
     var minimumHouseholds = getMinimumHouseholds();
-    var patentQuery = byId("patentFilter").value;
+    var patentQueries = getSelectedPatentNumbers();
     var startYear = Number(byId("startYearFilter").value || 0);
     var endYear = Number(byId("endYearFilter").value || 0);
     var output = [];
@@ -1537,7 +1579,7 @@ function timestampText() {
         locationMatches = recordMatchesLocation(record, provinceCodes[provinceIndex], cityName);
       }
       if (workTypeMatches && locationMatches &&
-          recordMatches(record, patentQuery, "특허번호") &&
+          recordMatchesAnyPatent(record, patentQueries) &&
           record._searchCache.households >= minimumHouseholds) {
         output.push(record);
       }
@@ -1586,7 +1628,7 @@ function timestampText() {
     byId("criteriaSummary").innerText = "공종 " + criteria.workType + " · 지역 " + (criteria.region || "전체") +
       " · 도시 " + (criteria.district || "전체") + " · 세대수 " +
       (criteria.minimumHouseholds ? Number(criteria.minimumHouseholds).toLocaleString() + "세대 이상" : "전체") +
-      " · 특허번호 " + (criteria.patentNumber ? "10-" + criteria.patentNumber : "전체") +
+      " · 특허번호 " + (criteria.patentNumber || "전체") +
       " · 기간 " + (criteria.startYear || "전체") + " ~ " + (criteria.endYear || "전체");
     byId("yearSummary").innerText = summarizeCounts("년도", true);
     byId("workTypeSummary").innerText = summarizeCounts("공종", false);
@@ -2016,6 +2058,7 @@ function timestampText() {
   function getSelectedCriteria() {
     var workTypes = getSelectedWorkTypes();
     var provinceCodes = getSelectedProvinceCodes();
+    var patentNumbers = getSelectedPatentNumbers();
     var city = byId("cityFilter");
     return {
       workType: workTypes.length ? getWorkTypeSummary(workTypes) : "전체",
@@ -2025,7 +2068,8 @@ function timestampText() {
       district: city.selectedIndex > 0 ? city.options[city.selectedIndex].text : "",
       districtOfficial: city.value,
       minimumHouseholds: getMinimumHouseholds(),
-      patentNumber: byId("patentFilter").value,
+      patentNumber: formatPatentNumbers(patentNumbers).join(", "),
+      patentNumbers: patentNumbers,
       startYear: byId("startYearFilter").value,
       endYear: byId("endYearFilter").value,
       nameCompany: ""
@@ -2087,14 +2131,21 @@ function timestampText() {
 
   function populatePatentFilter() {
     var keys = state.index.metadata.patentNumbers || [];
-    var select = byId("patentFilter");
+    var panel = byId("patentPanel");
+    panel.innerHTML = "";
     var i;
     for (i = 0; i < keys.length; i++) {
-      var option = document.createElement("option");
-      option.value = String(keys[i]).replace(/^10-/, "");
-      option.text = /^10-/.test(keys[i]) ? keys[i] : "10-" + keys[i];
-      select.add(option);
+      var label = document.createElement("label");
+      label.className = "check-combo-option";
+      var checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = String(keys[i]).replace(/^10-/, "");
+      checkbox.onclick = updatePatentSummary;
+      label.appendChild(checkbox);
+      label.appendChild(document.createTextNode(/^10-/.test(keys[i]) ? keys[i] : "10-" + keys[i]));
+      panel.appendChild(label);
     }
+    updatePatentSummary();
   }
 
   function saveSearchCriteria() {
@@ -2107,7 +2158,7 @@ function timestampText() {
       var saved = JSON.parse(window.localStorage.getItem("pourSearchCriteria") || "null");
       if (!saved) { return; }
       setSelectedWorkTypes(saved.workTypes || (saved.workType && saved.workType !== "전체" ? [saved.workType] : []));
-      byId("patentFilter").value = saved.patentNumber || "";
+      setSelectedPatentNumbers(saved.patentNumbers || (saved.patentNumber ? [saved.patentNumber] : []));
       setSelectedProvinces(saved.regionCodes || (saved.regionCode ? [saved.regionCode] : []));
       populateCityFilter(saved.districtOfficial || "");
       byId("householdInput").value = saved.minimumHouseholds || "";
@@ -2151,7 +2202,6 @@ function timestampText() {
     byId("exportXlsxButton").disabled = true;
     if (byId("exportCsvButton")) byId("exportCsvButton").disabled = true;
     if (byId("exportPdfButton")) byId("exportPdfButton").disabled = true;
-    byId("patentFilter").options.length = 1;
     byId("startYearFilter").options.length = 1;
     byId("endYearFilter").options.length = 1;
     populateFilters();
@@ -2193,24 +2243,28 @@ function timestampText() {
       if (event.stopPropagation) { event.stopPropagation(); }
       event.cancelBubble = true;
     }
-    function bindCheckCombo(buttonId, comboId, panelId, otherComboId) {
+    var comboIds = ["workTypeCombo", "regionCombo", "patentCombo"];
+    function bindCheckCombo(buttonId, comboId, panelId) {
       byId(buttonId).onclick = function (event) {
         stopEvent(event);
-        byId(otherComboId).className = "check-combo";
         var combo = byId(comboId);
-        combo.className = combo.className.indexOf(" open") >= 0 ? "check-combo" : "check-combo open";
+        var willOpen = combo.className.indexOf(" open") < 0;
+        var i;
+        for (i = 0; i < comboIds.length; i++) { byId(comboIds[i]).className = "check-combo"; }
+        if (willOpen) { combo.className = "check-combo open"; }
       };
       // 목록 안을 눌러도 닫히지 않게 해서 여러 개를 이어서 고를 수 있게 한다.
       byId(panelId).onclick = stopEvent;
     }
-    bindCheckCombo("workTypeButton", "workTypeCombo", "workTypePanel", "regionCombo");
-    bindCheckCombo("regionButton", "regionCombo", "regionPanel", "workTypeCombo");
+    bindCheckCombo("workTypeButton", "workTypeCombo", "workTypePanel");
+    bindCheckCombo("regionButton", "regionCombo", "regionPanel");
+    bindCheckCombo("patentButton", "patentCombo", "patentPanel");
     byId("clearButton").onclick = function () {
       setSelectedWorkTypes([]);
       setSelectedProvinces([]);
       populateCityFilter("");
       byId("householdInput").value = "";
-      byId("patentFilter").value = "";
+      setSelectedPatentNumbers([]);
       byId("startYearFilter").value = "";
       byId("endYearFilter").value = "";
       applyFilters();
@@ -2269,6 +2323,7 @@ function timestampText() {
       byId("selectionMenu").className = "context-menu";
       byId("workTypeCombo").className = "check-combo";
       byId("regionCombo").className = "check-combo";
+      byId("patentCombo").className = "check-combo";
     };
   }
 
