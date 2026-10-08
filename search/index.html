@@ -249,7 +249,7 @@ html, body { max-width: 100%; }
         <div class="search-fields">
           <div class="field-group"><label for="workTypeButton">공종</label><div id="workTypeCombo" class="check-combo"><button id="workTypeButton" class="check-combo-button" type="button">전체</button><div id="workTypePanel" class="check-combo-panel"></div></div></div>
           <div class="field-group patent-field"><label for="patentFilter">특허번호</label><select id="patentFilter"><option value="">전체</option></select></div>
-          <div class="field-group region-field"><label for="provinceFilter">지역</label><select id="provinceFilter"><option value="">전체</option></select></div>
+          <div class="field-group region-field"><label for="regionButton">지역</label><div id="regionCombo" class="check-combo"><button id="regionButton" class="check-combo-button" type="button">전체</button><div id="regionPanel" class="check-combo-panel"></div></div></div>
           <div class="field-group region-field"><label for="cityFilter">도시</label><select id="cityFilter"><option value="">전체</option></select></div>
           <div class="field-group household-field"><label for="householdInput">세대수</label><input id="householdInput" type="text" inputmode="numeric" maxlength="7" autocomplete="off" placeholder="최소" /></div>
           <div class="field-group year-field"><label for="startYearFilter">시작년도</label><select id="startYearFilter"><option value="">전체</option></select></div>
@@ -1021,15 +1021,17 @@ function buildIndexFromFile(file, done) {
 function resetSearchState() {
   try { window.localStorage.removeItem("pourSearchCriteria"); } catch (e) {}
   POUR_STATE.index = null;
-  ["patentFilter", "provinceFilter", "cityFilter",
+  ["patentFilter", "cityFilter",
    "startYearFilter", "endYearFilter"].forEach(function (id) {
     var el = document.getElementById(id);
     if (el) { el.value = ""; el.options.length = 1; }     // "전체" 만 남긴다
   });
   var households = document.getElementById("householdInput");
   if (households) households.value = "";
-  var panel = document.getElementById("workTypePanel");
-  if (panel) panel.innerHTML = "";
+  ["workTypePanel", "regionPanel"].forEach(function (id) {
+    var panel = document.getElementById(id);
+    if (panel) panel.innerHTML = "";
+  });
   var body = document.getElementById("resultBody");
   if (body) body.innerHTML = "";
   var count = document.getElementById("resultCount");
@@ -1198,6 +1200,59 @@ function timestampText() {
     updateWorkTypeSummary();
   }
 
+  // 지역(시·도) 다중 선택. 값은 PROVINCE_OPTIONS 의 코드("11", "12G" 등).
+  function getSelectedProvinceInputs() {
+    var panel = byId("regionPanel");
+    var inputs = panel ? panel.getElementsByTagName("input") : [];
+    var checked = [];
+    var i;
+    for (i = 0; i < inputs.length; i++) {
+      if (inputs[i].checked) { checked.push(inputs[i]); }
+    }
+    return checked;
+  }
+
+  function getSelectedProvinceCodes() {
+    var inputs = getSelectedProvinceInputs();
+    var values = [];
+    var i;
+    for (i = 0; i < inputs.length; i++) { values.push(inputs[i].value); }
+    return values;
+  }
+
+  function getSelectedProvinceNames() {
+    var inputs = getSelectedProvinceInputs();
+    var names = [];
+    var i;
+    for (i = 0; i < inputs.length; i++) { names.push(inputs[i].getAttribute("data-name")); }
+    return names;
+  }
+
+  // 도시는 지역을 하나만 골랐을 때만 고를 수 있다.
+  function getSingleProvinceCode() {
+    var codes = getSelectedProvinceCodes();
+    return codes.length === 1 ? codes[0] : "";
+  }
+
+  function updateRegionSummary() {
+    byId("regionButton").innerText = getWorkTypeSummary(getSelectedProvinceNames());
+  }
+
+  function onRegionChanged() {
+    updateRegionSummary();
+    populateCityFilter("");
+  }
+
+  function setSelectedProvinces(codes) {
+    var selected = {};
+    var i;
+    codes = codes || [];
+    for (i = 0; i < codes.length; i++) { selected[String(codes[i])] = true; }
+    var inputs = byId("regionPanel").getElementsByTagName("input");
+    for (i = 0; i < inputs.length; i++) { inputs[i].checked = !!selected[inputs[i].value]; }
+    updateRegionSummary();
+  }
+
   function byId(id) {
     return document.getElementById(id);
   }
@@ -1233,22 +1288,30 @@ function timestampText() {
   }
 
   function populateProvinceFilter() {
-    var select = byId("provinceFilter");
-    select.options.length = 1;
+    var panel = byId("regionPanel");
+    panel.innerHTML = "";
     var i;
     for (i = 0; i < PROVINCE_OPTIONS.length; i++) {
       if (!getProvinceByCode(PROVINCE_OPTIONS[i][1])) { continue; }
-      var option = document.createElement("option");
-      option.text = PROVINCE_OPTIONS[i][0];
-      option.value = PROVINCE_OPTIONS[i][1];
-      select.add(option);
+      var label = document.createElement("label");
+      label.className = "check-combo-option";
+      var checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = PROVINCE_OPTIONS[i][1];
+      checkbox.setAttribute("data-name", PROVINCE_OPTIONS[i][0]);
+      checkbox.onclick = onRegionChanged;
+      label.appendChild(checkbox);
+      label.appendChild(document.createTextNode(PROVINCE_OPTIONS[i][0]));
+      panel.appendChild(label);
     }
+    updateRegionSummary();
   }
 
   function populateCityFilter(selectedValue) {
     var select = byId("cityFilter");
     select.options.length = 1;
-    var province = getProvinceByCode(byId("provinceFilter").value);
+    var provinceCode = getSingleProvinceCode();
+    var province = getProvinceByCode(provinceCode);
     if (!province) { select.disabled = true; return; }
     select.disabled = false;
     var seen = {};
@@ -1256,8 +1319,8 @@ function timestampText() {
     var i;
     for (i = 0; i < districts.length; i++) {
       var official = String(districts[i].name || "");
-      if (byId("provinceFilter").value === "12G" && String(districts[i].code).indexOf("122") !== 0) { continue; }
-      if (byId("provinceFilter").value === "12J" && String(districts[i].code).indexOf("122") === 0) { continue; }
+      if (provinceCode === "12G" && String(districts[i].code).indexOf("122") !== 0) { continue; }
+      if (provinceCode === "12J" && String(districts[i].code).indexOf("122") === 0) { continue; }
       if (!official || official.indexOf(" ") >= 0) { continue; }
       var display = official.replace(/[시군구]$/, "");
       if (seen[display]) { continue; }
@@ -1439,8 +1502,8 @@ function timestampText() {
     for (workTypeNormalizeIndex = 0; workTypeNormalizeIndex < workTypeQueries.length; workTypeNormalizeIndex++) {
       normalizedWorkTypes.push(normalizeText(workTypeQueries[workTypeNormalizeIndex]));
     }
-    var provinceCode = byId("provinceFilter").value;
-    var cityName = byId("cityFilter").value;
+    var provinceCodes = getSelectedProvinceCodes();
+    var cityName = provinceCodes.length === 1 ? byId("cityFilter").value : "";
     var minimumHouseholds = getMinimumHouseholds();
     var patentQuery = byId("patentFilter").value;
     var startYear = Number(byId("startYearFilter").value || 0);
@@ -1468,8 +1531,12 @@ function timestampText() {
       for (workTypeIndex = 0; !workTypeMatches && workTypeIndex < normalizedWorkTypes.length; workTypeIndex++) {
         workTypeMatches = record._searchCache.workType.indexOf(normalizedWorkTypes[workTypeIndex]) >= 0;
       }
-      if (workTypeMatches &&
-          recordMatchesLocation(record, provinceCode, cityName) &&
+      var locationMatches = provinceCodes.length === 0;
+      var provinceIndex;
+      for (provinceIndex = 0; !locationMatches && provinceIndex < provinceCodes.length; provinceIndex++) {
+        locationMatches = recordMatchesLocation(record, provinceCodes[provinceIndex], cityName);
+      }
+      if (workTypeMatches && locationMatches &&
           recordMatches(record, patentQuery, "특허번호") &&
           record._searchCache.households >= minimumHouseholds) {
         output.push(record);
@@ -1948,13 +2015,13 @@ function timestampText() {
 
   function getSelectedCriteria() {
     var workTypes = getSelectedWorkTypes();
-    var province = byId("provinceFilter");
+    var provinceCodes = getSelectedProvinceCodes();
     var city = byId("cityFilter");
     return {
       workType: workTypes.length ? getWorkTypeSummary(workTypes) : "전체",
       workTypes: workTypes,
-      region: province.selectedIndex > 0 ? province.options[province.selectedIndex].text : "",
-      regionCode: province.value,
+      region: getSelectedProvinceNames().join(", "),
+      regionCodes: provinceCodes,
       district: city.selectedIndex > 0 ? city.options[city.selectedIndex].text : "",
       districtOfficial: city.value,
       minimumHouseholds: getMinimumHouseholds(),
@@ -2041,7 +2108,7 @@ function timestampText() {
       if (!saved) { return; }
       setSelectedWorkTypes(saved.workTypes || (saved.workType && saved.workType !== "전체" ? [saved.workType] : []));
       byId("patentFilter").value = saved.patentNumber || "";
-      byId("provinceFilter").value = saved.regionCode || "";
+      setSelectedProvinces(saved.regionCodes || (saved.regionCode ? [saved.regionCode] : []));
       populateCityFilter(saved.districtOfficial || "");
       byId("householdInput").value = saved.minimumHouseholds || "";
       byId("startYearFilter").value = saved.startYear || "";
@@ -2121,16 +2188,26 @@ function timestampText() {
     byId("searchButton").onclick = runSearch;
     byId("selectWorkbookButton").onclick = selectWorkbook;
     byId("currentWorkbookButton").onclick = selectWorkbook;
-    byId("workTypeButton").onclick = function (event) {
+    function stopEvent(event) {
       event = event || window.event;
       if (event.stopPropagation) { event.stopPropagation(); }
       event.cancelBubble = true;
-      var combo = byId("workTypeCombo");
-      combo.className = combo.className.indexOf(" open") >= 0 ? "check-combo" : "check-combo open";
-    };
+    }
+    function bindCheckCombo(buttonId, comboId, panelId, otherComboId) {
+      byId(buttonId).onclick = function (event) {
+        stopEvent(event);
+        byId(otherComboId).className = "check-combo";
+        var combo = byId(comboId);
+        combo.className = combo.className.indexOf(" open") >= 0 ? "check-combo" : "check-combo open";
+      };
+      // 목록 안을 눌러도 닫히지 않게 해서 여러 개를 이어서 고를 수 있게 한다.
+      byId(panelId).onclick = stopEvent;
+    }
+    bindCheckCombo("workTypeButton", "workTypeCombo", "workTypePanel", "regionCombo");
+    bindCheckCombo("regionButton", "regionCombo", "regionPanel", "workTypeCombo");
     byId("clearButton").onclick = function () {
       setSelectedWorkTypes([]);
-      byId("provinceFilter").value = "";
+      setSelectedProvinces([]);
       populateCityFilter("");
       byId("householdInput").value = "";
       byId("patentFilter").value = "";
@@ -2155,7 +2232,6 @@ function timestampText() {
     byId("exportXlsxButton").onclick = function () { exportSelected("XLSX"); };
     byId("exportCsvButton").onclick = function () { exportSelected("CSV"); };
     byId("exportPdfButton").onclick = exportPdf;
-    byId("provinceFilter").onchange = function () { populateCityFilter(""); };
     byId("householdInput").oninput = function () {
       this.value = this.value.replace(/[^0-9]/g, "").replace(/^0+(?=\d)/, "");
     };
@@ -2192,6 +2268,7 @@ function timestampText() {
     document.onclick = function () {
       byId("selectionMenu").className = "context-menu";
       byId("workTypeCombo").className = "check-combo";
+      byId("regionCombo").className = "check-combo";
     };
   }
 
