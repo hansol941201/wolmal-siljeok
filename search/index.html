@@ -75,7 +75,9 @@ main { min-height: 0; flex: 1; display: flex; flex-direction: column; padding: 1
 .region-field { min-width: 105px; }
 .household-field { min-width: 80px; max-width: 90px; flex: 0 0 84px; }
 .year-separator { align-self: center; margin-top: 20px; font-weight: 700; color: #17375E; }
-.search-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 14px; }
+.search-actions { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 9px; margin-top: 14px; }
+.pdf-work-type-option { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.pdf-work-type-option input { width: 17px; height: 17px; margin: 0; accent-color: #F58220; }
 
 .result-summary { min-height: 48px; display: flex; align-items: center; padding: 8px 2px; }
 .result-count { margin-left: 10px; color: #F58220; font-size: 19px; font-weight: 700; }
@@ -260,7 +262,7 @@ html, body { max-width: 100%; }
         <div class="search-actions">
           <button id="searchButton" type="button">검색</button>
           <button id="clearButton" class="secondary-button" type="button">초기화</button>
-          <button id="exportXlsxButton" class="accent-button" type="button">엑셀 내보내기</button><button id="exportCsvButton" class="secondary-button" type="button">CSV</button><button id="exportPdfButton" class="secondary-button" type="button" title="A4 세로 PDF 로 바로 저장합니다. 저장 위치는 브라우저 다운로드 설정(예: 바탕 화면)을 따릅니다.">PDF 내보내기</button>
+          <button id="exportXlsxButton" class="accent-button" type="button">엑셀 내보내기</button><button id="exportCsvButton" class="secondary-button" type="button">CSV</button><label class="pdf-work-type-option"><input id="pdfIncludeWorkType" type="checkbox">PDF에 공종명 포함</label><button id="exportPdfButton" class="secondary-button" type="button" title="A4 세로 PDF 로 바로 저장합니다. 저장 위치는 브라우저 다운로드 설정(예: 바탕 화면)을 따릅니다.">PDF 내보내기</button>
         </div>
       </section>
 
@@ -1959,11 +1961,14 @@ function timestampText() {
       alert("내보낼 검색 결과가 없습니다.");
       return;
     }
-    // PDF에는 화면의 표시 열과 별도로 각 실적의 공종명을 함께 담는다.
+    // 선택한 경우에만 PDF에 각 실적의 공종명을 함께 담는다.
     // 직접 저장과 인쇄 대체 경로가 동일한 열 구성을 사용한다.
-    var pdfColumns = state.config.resultColumns.slice(0);
+    var includeWorkType = byId("pdfIncludeWorkType").checked;
+    var pdfColumns = state.config.resultColumns.filter(function (c) {
+      return includeWorkType || c.key !== "공종";
+    });
     var hasWorkType = pdfColumns.some(function (c) { return c.key === "공종"; });
-    if (!hasWorkType) {
+    if (includeWorkType && !hasWorkType) {
       var workTypeAt = pdfColumns.length;
       pdfColumns.some(function (c, i) {
         if (c.key === "공사명") { workTypeAt = i + 1; return true; }
