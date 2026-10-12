@@ -1959,11 +1959,23 @@ function timestampText() {
       alert("내보낼 검색 결과가 없습니다.");
       return;
     }
+    // PDF에는 화면의 표시 열과 별도로 각 실적의 공종명을 함께 담는다.
+    // 직접 저장과 인쇄 대체 경로가 동일한 열 구성을 사용한다.
+    var pdfColumns = state.config.resultColumns.slice(0);
+    var hasWorkType = pdfColumns.some(function (c) { return c.key === "공종"; });
+    if (!hasWorkType) {
+      var workTypeAt = pdfColumns.length;
+      pdfColumns.some(function (c, i) {
+        if (c.key === "공사명") { workTypeAt = i + 1; return true; }
+        return false;
+      });
+      pdfColumns.splice(workTypeAt, 0, { key: "공종", label: "공종명", width: 140 });
+    }
     var payload = {
       rows: rows,
-      columns: state.config.resultColumns.map(function (c) { return c.key; }),
-      labels: state.config.resultColumns.map(function (c) { return c.label; }),
-      widths: state.config.resultColumns.map(function (c) { return c.width || 60; }),
+      columns: pdfColumns.map(function (c) { return c.key; }),
+      labels: pdfColumns.map(function (c) { return c.label; }),
+      widths: pdfColumns.map(function (c) { return c.width || 60; }),
       criteriaText: describeCriteria(getSelectedCriteria())
     };
     setBusy(true, "PDF 만드는 중...", rows.length + "건을 담고 있습니다.");
