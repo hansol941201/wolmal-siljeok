@@ -3026,6 +3026,11 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
   };
 
   function sanitize(text) {
+    // 엑셀에서 복사된 특수 공백과 보이지 않는 서식 문자를 정리한다.
+    // 조합형 한글은 같은 글자의 완성형으로 정규화해 글꼴 누락을 막는다.
+    if (text.normalize) { text = text.normalize("NFC"); }
+    text = text.replace(/[\u00A0\u2000-\u200A\u202F\u205F]/g, " ")
+      .replace(/[\u00AD\u200B\u2060\uFEFF]/g, "");
     buildCoverage();
     if (!coverage) { return text; }
     var out = "";
@@ -3319,7 +3324,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
 
     closingPage(doc, period, total, criteria);
 
-    // 글꼴에 없는 글자가 있었다면 빈칸으로 나가므로 그대로 알린다.
+    // 지원하지 않는 문자가 남아 있으면 다운로드 전에 인쇄 대체 경로로 넘긴다.
     var flat = [];
     groups.forEach(function (g) {
       g.body.forEach(function (r) { r.forEach(function (c) { flat.push(c); }); });
@@ -3327,9 +3332,11 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     flat.push(criteria);
     var miss = missingChars(flat);
     if (miss.length) {
-      window.alert("이 글꼴에 없는 글자가 있어 PDF 에서 빈칸으로 나옵니다.\n\n"
-        + miss.slice(0, 40).join(" ")
-        + (miss.length > 40 ? " … 모두 " + miss.length + "자" : ""));
+      // 빈칸이 생긴 PDF를 저장하지 않고 기존 인쇄 대체 경로로 넘긴다.
+      throw new Error("PDF 글꼴이 지원하지 않는 문자가 있습니다: "
+        + miss.slice(0, 40).map(function (c) {
+          return c + " (U+" + ("0000" + c.charCodeAt(0).toString(16).toUpperCase()).slice(-4) + ")";
+        }).join(", ") + ". 인쇄로 저장하면 브라우저의 대체 글꼴을 사용할 수 있습니다.");
     }
 
     // 쪽번호의 전체 쪽수를 채운다
